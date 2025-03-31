@@ -1,25 +1,264 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bugatti 3D Model</title>
-    <style>
-        body { margin: 0; overflow: hidden; }
-        canvas { display: block; }
-    </style>
-    <!-- Add this before your script -->
-    <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
-    <script type="importmap">
-        {
-            "imports": {
-                "three": "https://unpkg.com/three@0.161.0/build/three.module.js",
-                "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/"
-            }
-        }
-    </script>
+  <meta charset="UTF-8" />
+  <title>3D Model Viewer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+    }
+    canvas {
+      display: block;
+    }
+    /* Sidebar for model selection */
+    #modelSelector {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      background: rgba(240, 240, 240, 0.9);
+      padding: 10px;
+      border-radius: 5px;
+      z-index: 10;
+    }
+    #modelSelector button {
+      display: block;
+      margin-bottom: 5px;
+      padding: 8px;
+      width: 150px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    /* Loading overlay */
+    #loading {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: white;
+      font-size: 24px;
+      font-family: Arial, sans-serif;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 20px;
+      border-radius: 5px;
+      z-index: 10;
+      display: none;
+    }
+  </style>
+  <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.161.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/"
+      }
+    }
+  </script>
 </head>
 <body>
-    <script type="module" src="script.js"></script>
+  <div id="modelSelector">
+    <button data-index="0">Cyber Samurai</button>
+    <button data-index="1">Spartan</button>
+    <button data-index="2">Skull</button>
+    <button data-index="3">Bugatti</button>
+  </div>
+  <div id="loading">Loading: 0%</div>
+
+  <script type="module">
+    import * as THREE from "three";
+    import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+    import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+
+    // Define your models.
+    const models = [
+      { name: "Cyber Samurai", path: "/cyber_samurai.glb", scale: 2.5 },
+      { name: "Spartan", path: "/spartan.glb", scale: 2.0 },
+      { name: "Skull", path: "/skull.glb", scale: 1.8 },
+      { name: "Bugatti", path: "/bugatti.glb", scale: 1.2 }
+    ];
+
+    let currentModel = null;
+
+    // Create the scene.
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xf0f0f0);
+
+    // Set up the camera (default position).
+    const camera = new THREE.PerspectiveCamera(
+      75,
+      window.innerWidth / window.innerHeight,
+      0.1,
+      1000
+    );
+    camera.position.set(0, 2, 5);
+
+    // Set up the renderer.
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.shadowMap.enabled = true;
+    document.body.appendChild(renderer.domElement);
+
+    // Add lights.
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    scene.add(ambientLight);
+
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+    directionalLight.position.set(5, 10, 7.5);
+    directionalLight.castShadow = true;
+    scene.add(directionalLight);
+
+    // Add a ground plane.
+    const groundGeometry = new THREE.PlaneGeometry(100, 100);
+    const groundMaterial = new THREE.ShadowMaterial({ opacity: 0.5 });
+    const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+    ground.rotation.x = -Math.PI / 2;
+    ground.receiveShadow = true;
+    scene.add(ground);
+
+    // Set up OrbitControls.
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+
+    // Instantiate the GLTF loader.
+    const loader = new GLTFLoader();
+
+    // Get the loading element.
+    const loadingElement = document.getElementById("loading");
+
+    // Helper to clean up materials.
+    function cleanMaterial(material) {
+      material.dispose();
+      for (const key in material) {
+        if (material[key] && material[key].isTexture) {
+          material[key].dispose();
+        }
+      }
+    }
+
+    // Load a model by index.
+    function loadModel(index) {
+      // Remove any existing model.
+      if (currentModel) {
+        scene.remove(currentModel);
+        currentModel.traverse((child) => {
+          if (child.isMesh) {
+            child.geometry.dispose();
+            if (child.material) {
+              if (Array.isArray(child.material)) {
+                child.material.forEach(cleanMaterial);
+              } else {
+                cleanMaterial(child.material);
+              }
+            }
+          }
+        });
+        currentModel = null;
+      }
+
+      // Show the loading overlay.
+      loadingElement.style.display = "block";
+      loadingElement.textContent = "Loading: 0%";
+
+      loader.load(
+        models[index].path,
+        (gltf) => {
+          const model = gltf.scene;
+
+          // Apply the defined scale.
+          model.scale.set(
+            models[index].scale,
+            models[index].scale,
+            models[index].scale
+          );
+
+          // Center the model using its bounding box.
+          const box = new THREE.Box3().setFromObject(model);
+          const center = box.getCenter(new THREE.Vector3());
+          model.position.set(-center.x, -center.y, -center.z);
+
+          // Apply model-specific vertical offset adjustments.
+          if (models[index].name === "Spartan") {
+            // Move Spartan downward by 200px.
+            model.position.y -= 2; // Adjust as needed.
+          } else if (models[index].name === "Bugatti") {
+            // Move Bugatti upward by 300px.
+            model.position.y += 3; // Adjust as needed.
+          }
+
+          // Enable shadows for meshes.
+          model.traverse((node) => {
+            if (node.isMesh) {
+              node.castShadow = false;
+              node.receiveShadow = true;
+            }
+          });
+
+          scene.add(model);
+          currentModel = model;
+
+          // Hide the loading overlay.
+          loadingElement.style.display = "none";
+        },
+        (xhr) => {
+          if (xhr.total) {
+            const percentComplete = (xhr.loaded / xhr.total) * 100;
+            loadingElement.textContent = "Loading: " + Math.round(percentComplete) + "%";
+          }
+        },
+        (error) => {
+          console.error("An error occurred", error);
+          loadingElement.textContent = "Error loading model";
+        }
+      );
+    }
+
+    // Adjust camera and controls target based on the model.
+    function adjustCamera(index) {
+      if (models[index].name === "Spartan") {
+        // Lower the camera and adjust the target for Spartan.
+        camera.position.set(0, -1, 8);
+        controls.target.set(0, -1, 0);
+      } else if (models[index].name === "Bugatti") {
+        // Raise the camera and adjust the target for Bugatti.
+        camera.position.set(0, 6, 8);
+        controls.target.set(0, 3, 0);
+      } else {
+        // Default camera position and target.
+        camera.position.set(0, 2, 5);
+        controls.target.set(0, 0, 0);
+      }
+      controls.update();
+    }
+
+    // Handle window resize.
+    window.addEventListener("resize", () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // Animation loop.
+    function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    // Load the first model by default.
+    loadModel(0);
+
+    // Add event listeners to the model selection buttons.
+    document.querySelectorAll("#modelSelector button").forEach((button) => {
+      button.addEventListener("click", () => {
+        const index = parseInt(button.getAttribute("data-index"));
+        adjustCamera(index);
+        loadModel(index);
+      });
+    });
+  </script>
 </body>
 </html>
